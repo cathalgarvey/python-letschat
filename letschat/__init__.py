@@ -242,7 +242,7 @@ class API:
         else:
             return None
     
-    def get_rooms(self, room=None, skip=None, take=None):
+    def get_rooms(self, room=None, skip=None, take=None)->(dict, [dict]):
         if room:
             # Single-room usage
             return self._make_call('get', ['rooms', room])
@@ -255,25 +255,29 @@ class API:
             return self._make_call('get', ['rooms'], params)
 
     @property
-    def rooms(self):
+    def rooms(self)->{'slug': Room}:
         for room_dict in self.get_rooms():
             if room_dict['slug'] not in self._rooms:
                 self._rooms[room_dict['slug']] = Room(self, **room_dict)
         return self._rooms
     
-    def room_by_id(self, id):
+    def room_by_id(self, id)->Room:
+        "Gets a Room object by id."
         for room in self.rooms.values():
             if room.id == id:
                 return room
     
-    def make_room(self, name: str, slug: str, description: str)->dict:
-        return self._make_call('post', ['rooms'], {
+    def make_room(self, name: str, slug: str, description: str)->Room:
+        "Creates the specified room and returns the Room object."
+        resp = self._make_call('post', ['rooms'], {
                 'name': name,
                 'slug': slug,
                 'description': description
             })
+        return self.rooms[slug]
     
     def update_room(self, room_slug: str, name: str=None, description: str=None)->None:
+        "Using room_slug, update name and/or description."
         params = {}
         if name is not None:
             params['name'] = name
@@ -282,9 +286,16 @@ class API:
         return self._make_call('put', ['rooms', room_slug], params)
 
     def remove_room(self, room_slug: str)->None:
+        "Delete a room."
         return self._make_call('delete', ['rooms', room_slug])
     
     def get_room_users(self, room_slug: str)->list:
+        """
+        Gets a list of user dictionaries from a room.
+        
+        The 'Room' object (as found in self.rooms) has a convenience property 'users'
+        that returns Account objects rather than dictionaries.
+        """
         return self._make_call('get', ['rooms', room_slug, 'users'])
 
     def get_messages(self,  room_id: str, # Filter by room; id only?
@@ -296,9 +307,13 @@ class API:
                             reverse: bool = True, # Whether to reverse
                             expand_owner: bool = False,  # Expand ownerid to user object
                             expand_room:  bool = False # Expand roomid to room object
-                            )->list:
+                            )->[dict]:
         """
         Gets messages, optionally filtering by one or many parameters.
+        
+        The recommended way of getting messages for most purposes is to access
+        the desired room from API.rooms (indexed by slug) and to use either the
+        Room.messages property or Room.unread() method to get Message objects.
         
         room_id (str): Filter rooms by Room ID.
         since_id (str): Returns results with an ID greater than (more recent than)
@@ -338,9 +353,21 @@ class API:
         return self._make_call('get', ['messages'], params)
 
     def make_message(self, room_id: str, text: str)->dict:
+        """
+        Creates a message containing the given text in the given room_id.
+        
+        The recommended way to do this is to use the Room.post method instead,
+        or if replying to a post to use the Message.reply method.
+        """
         return self._make_call('post', ['messages'], {'text':text, 'room':room_id})
     
     def get_files(self, room_id: str, skip: int = 0, take: int = 500)->list:
+        """
+        Gets a list of files from room_id.
+        
+        The recommended way to access this is the Room.files property, which
+        returns letschat.File objects.
+        """
         params = {'room': room_id}
         if skip != 0:
             params['skip'] = skip
@@ -351,6 +378,11 @@ class API:
     def post_file(self, room_id: str, file: 'file-like', filename: str, mimetype: str)->dict:
         """
         Uses the unspecified POST->/files API call, may not be a stable API.
+
+        The Room object has a post_image method that uploads a specified file,
+        guessing mimetype, which can be used when the file is a static image.
+        For non-images or dynamically generated content, API.post_file is more
+        appropriate.
         
         file argument should be a binary file-like object; either an open file,
         or an io object such as io.BytesIO.
@@ -366,7 +398,10 @@ class API:
         r.raise_for_status()
         return r
 
-    def get_users(self, skip: int = 0, take: int = 500)->list:
+    def get_users(self, skip: int = 0, take: int = 500)->[dict]:
+        """
+        Gets a list of all users.
+        """
         params = {}
         if skip != 0:
             params['skip'] = skip
@@ -375,11 +410,20 @@ class API:
         return self._make_call('get', ['users'], params)
         
     def get_user(self, user_id: str)->dict:
+        """
+        Gets just one user.
+        """
         return self._make_call('get', ['users', user_id])
 
     def get_account(self)->dict:
+        """
+        Raw API call to get account data as a dictionary.
+        """
         return self._make_call('get', ['account'])
     
     def account(self)->Account:
+        """
+        Wrapped API call returning an Account object for the API key's owner.
+        """
         return Account(self, **self.get_account())
 
