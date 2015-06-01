@@ -25,6 +25,11 @@ def _guess_img_mimetype(filename):
         }[img_type]
 
 class Account:
+    """
+    Wraps an account to provide convenience properties that assist in working with
+    API generated data. Can also fetch/store Gravatars, but this is done only when
+    the self.gravatar property is first accessed.
+    """
     def __init__(self, api, username, id, displayName, avatar, firstName='', lastName=''):
         self.api = api
         self.username = username
@@ -36,11 +41,11 @@ class Account:
         self._gravatar = b''
         
     @property
-    def gravatar_url(self):
+    def gravatar_url(self)->str:
         return 'https://www.gravatar.com/avatar/{}'.format(self.avatar)
 
     @property
-    def gravatar(self):
+    def gravatar(self)->bytes:
         if not self._gravatar:
             r = requests.get(self.gravatar_url)
             r.raise_for_status()
@@ -48,30 +53,75 @@ class Account:
         return self._gravatar
 
 
-class Message:
+class File:
+    """
+    Wraps a file object as returned by the API, allowing authenticated download
+    of file content.
+    """
     def __init__(self,  api: 'API object',
-                        room: 'Room object',
+                        id: str, 
+                        name: str, 
+                        owner: str, 
+                        room: str, 
+                        size: str, 
+                        type: str, 
+                        uploaded: str, 
+                        url: str):
+        self.api = api
+        self.id = id
+        self.name = name
+        self.owner = Account(self.api, api.get_user(owner))
+        self.room = room
+        self.size = size
+        self.type = type
+        self.uploaded = uploaded
+        self.url = url
+        self._content = b''
+    
+    def content(self):
+        if not self._content:
+            auth = (self.api.token, "!")
+            r = requests.get(self.api.endpoint + "/" + self.url, auth=auth)
+            r.raise_for_status()
+            self._content = r.content
+        return self._content
+
+class Message:
+    """
+    Wraps a message to provide convenience properties and functions.
+    
+    Messages 'belong' to their parent room and grandparent API, and have both as
+    properties.
+    """
+    def __init__(self,  api: 'API object',
+                        parent_room: 'Room object',
+                        room: str,
                         id: str,
                         text: str,
                         posted: str,
                         owner: dict):
-        """
-        """
         self.api = api
-        self.room = room
+        self.room = parent_room
+        self.room_id = room
         self.id = id
         self.text = text
         self.posted = posted
         self.owner = Account(api, **owner)
+        
+    def __str__(self):
+        return '{}: {}'.format(self.owner.username, self.text)
 
-    def reply(self, message):
+    def __repr__(self):
+        return 'Message<#{}: "{}">'.format(self.room.slug, str(self)[:18])
+
+    def reply(self, message)->dict:
         """
         Reply to this message, beginning with an @mention of the replied-to author.
         
         eg, calling Message.reply("I denounce thee!") on something written by
         a user named heretic14 would result in "@heretic14: I denounce thee!".
         """
-        return self.room.post('{}: {}'.format(self.owner.username, message))
+        return self.room.post('@{}: {}'.format(self.owner.username, message))
 
 
 class Room:
@@ -101,7 +151,15 @@ class Room:
             pass
 
     @property
-    def name(self):
+    def users(self)->[Account]:
+        return [Account(self.api, **u) for u in self.api.get_room_users(self.slug)]
+    
+    @property
+    def files(self)->[File]:
+        return [File(self.api, **F) for F in self.api.get_files(self.id)]
+
+    @property
+    def name(self)->str:
         return self._name
     
     @name.setter
@@ -109,7 +167,7 @@ class Room:
         self.api.update_room(self.slug, name=new_name)
 
     @property
-    def description(self):
+    def description(self)->str:
         return self._description
     
     @description.setter
@@ -117,20 +175,21 @@ class Room:
         self.api.update_room(self.slug, description=new_description)
         
     @property
-    def messages(self):
+    def messages(self)->[Message]:
         "Returns up to 500 messages from this channel."
-        return self.api.get_messages(self.id, reverse=False,
+        m = self.api.get_messages(self.id, reverse=False,
             expand_owner = True, expand_room = True)
+        return [Message(self.api, self, **msg) for msg in m]
     
-    def unread(self):
+    def unread(self)->[Message]:
         "Return messages since last-seen *or* the message preceding joining room."
         m = self.api.get_messages(self.id, since_id=self._last_seen,
             reverse=False, expand_owner = True, expand_room = True)
         if m:
             self._last_seen = m[-1]['id']
-        return m
+        return [Message(self.api, self, **msg) for msg in m]
         
-    def post(self, message):
+    def post(self, message)->dict:
         """
         Simply post a message to this room. This message will be among those
         returned by self.unread (changing this behaviour would require complex
@@ -140,7 +199,7 @@ class Room:
         """
         return self.api.make_message(self.id, message)
 
-    def post_image(self, filename):
+    def post_image(self, filename)->dict:
         "Given an image file-name, guess mimetype and post using given filename."
         with open(filename, 'rb') as img:
             mimetype = _guess_img_mimetype(filename)
@@ -158,6 +217,9 @@ class API:
         self.token = token
         self._rooms = {}
         _ = self.rooms  # Initialise the property
+
+    def __repr__(self):
+        return "API('{}', <{}>)".format(self.endpoint, self.account.username)
     
     def _make_call(self, method: str, api_bits: list, params: dict = {})->(list, dict, None):
         """
@@ -198,6 +260,11 @@ class API:
             if room_dict['slug'] not in self._rooms:
                 self._rooms[room_dict['slug']] = Room(self, **room_dict)
         return self._rooms
+    
+    def room_by_id(self, id):
+        for room in self.rooms.values():
+            if room.id == id:
+                return room
     
     def make_room(self, name: str, slug: str, description: str)->dict:
         return self._make_call('post', ['rooms'], {
@@ -312,4 +379,7 @@ class API:
 
     def get_account(self)->dict:
         return self._make_call('get', ['account'])
+    
+    def account(self)->Account:
+        return Account(self, **self.get_account())
 
