@@ -7,8 +7,7 @@ from setuptools import setup
 setup(
     name='letschat',
     version='0.0.1',
-    description='Python API for the Lets-Chat open source chat server 
-(https://github.com/sdelements/lets-chat)',
+    description='API for Lets-Chat open source chat server (https://github.com/sdelements/lets-chat)',
     author='Cathal Garvey',
     author_email='cathalgarvey@cathalgarvey.me',
     keywords=('chat', 'slack', 'lets-chat', 'lets chat', "let's chat", 'bot', 'api'),
