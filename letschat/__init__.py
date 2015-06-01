@@ -148,7 +148,7 @@ class Room:
             return self.api.post_file(self.id, img, filename, mimetype)
 
 
-class LetsChatAPI:
+class API:
     def __init__(self, endpoint: str, token: str):
         """
         endpoint: The base URI for the lets-chat server, such as 'http://localhost:5000'
